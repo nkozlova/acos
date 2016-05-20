@@ -46,22 +46,22 @@ const char* in_ntoa(in_addr_t addr) 		// взятие адреса в форма
 #define MAX_EVENTS (1 << 16)
 // максимальное кол-во
 
-#define SIZE (3 * 3 * 17)
+#define SIZE (3 * 17)
 // длина сторки сканирования - 3 порта и делитель разности адресов
-#define SIZE1 ((ADDR_FINISH - ADDR_START) / 3 / 17)
+#define SIZE1 ((ADDR_FINISH - ADDR_START) / 17)
 // промежуток событий между ## - кол-во новых закрытых socks
 
 void print(int& k, long int l)  				// вывод строки сканирования
 {
 	// когда закрываем очередной sock - выводим новое состояние строки
-  printf("\r|");
-  if (isatty(STDOUT_FILENO)) printf("\033[42m");
-  for (int i = 0; i < SIZE; i++) printf(i <= k? "#" : " ");
-  if (isatty(STDOUT_FILENO)) printf("\033[0m");	
-  printf("|");
-  fflush(stdout);
-  if (l % (SIZE1) == 0 && l != 0) 
+  if (l % (SIZE1) == 0) 
 	{
+		printf("\r|");
+		if (isatty(STDOUT_FILENO)) printf("\033[42m");
+		for (int i = 0; i < SIZE; i++) printf(i <= k? "#" : " ");
+		if (isatty(STDOUT_FILENO)) printf("\033[0m");	
+		printf("|");
+		fflush(stdout);
 		k++;
 		sleep(1);
 	}	
@@ -82,6 +82,8 @@ int main()
 	const char* HTTP_GET = "GET / HTTP/1.1\r\n\r\n";
 	uint32_t addr;
 	int sock;
+	FILE *f;
+	f = fopen("out.txt", "w");
 	for(int j = 0; j < 3; j++)
 	{
 	addr = ADDR_START;
@@ -99,6 +101,7 @@ int main()
 					if (errno != EINPROGRESS) 
 					{
 						print(k, ++l);
+						fprintf(f, "IP %s: connect error - bad file descriptor\n", in_ntoa(addr));
 						addr++;
 						continue;
 					}
@@ -122,6 +125,7 @@ int main()
 				{
 					struct in_addr addr;
 					addr.s_addr = htonl(sock.second.addr);
+					fprintf(f, "IP %s: connection timed out\n", inet_ntoa(addr));
 					close(sock.first);
 					print(k, ++l);
 				}
@@ -134,6 +138,15 @@ int main()
 			 	// если ошибка - закрываем сокет
 				if (events[i].events & EPOLLERR)
 				{
+					const char *sock_error = "unknown error";
+					int error = 0;
+					socklen_t errlen = sizeof(error);
+					getsockopt(sock, SOL_SOCKET, SO_ERROR, (void *)&error, &errlen);
+					if (error) 
+					{
+						sock_error = strerror(error);
+					}					
+					fprintf(f, "IP %s: %s\n", in_ntoa(state.addr), sock_error);
 					socks.erase(sock);
 					close(sock);
 	 				print(k, ++l);
@@ -160,6 +173,7 @@ int main()
 					{
 						char buf[1024] = {0};
 						int rsize;
+						fprintf(f, "IP %s: \n", in_ntoa(state.addr));
 						while ((rsize = read(sock, buf, sizeof(buf)))) 
 						{
 							if (rsize < 0) 
@@ -168,6 +182,7 @@ int main()
 								break;
 							}
 						}
+						fprintf(f, "%s", buf);
 						// исключаем завершенный сокет из epoll
 						if (epoll_ctl(epollfd, EPOLL_CTL_DEL, sock, NULL)) 
 						{
@@ -184,5 +199,6 @@ int main()
 		} // while
 	}	// for
 	close(epollfd);
+	fclose(f);
 	return 0;
 }
